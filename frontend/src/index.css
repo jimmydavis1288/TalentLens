@@ -150,3 +150,69 @@ input[type='password'] {
 .text-balance {
   text-wrap: balance;
 }
+
+@page {
+  size: A4 portrait;
+  margin: 14mm;
+}
+
+#portfolio-print-root {
+  display: none;
+}
+
+@media print {
+  html,
+  body {
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  body > *:not(#portfolio-print-root) {
+    display: none !important;
+  }
+
+  #portfolio-print-root {
+    display: block !important;
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    color: #111827;
+    background: #fff;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 10.5pt;
+    line-height: 1.45;
+  }
+
+  #portfolio-print-root h1 {
+    margin: 0 0 18pt;
+    font-family: Arial, sans-serif;
+    font-size: 25pt;
+    line-height: 1.1;
+  }
+
+  #portfolio-print-root h2 {
+    margin: 14pt 0 5pt;
+    border-bottom: 1px solid #cbd5e1;
+    padding-bottom: 3pt;
+    font-family: Arial, sans-serif;
+    font-size: 14pt;
+    break-after: avoid-page;
+  }
+
+  #portfolio-print-root article {
+    break-inside: avoid-page;
+  }
+
+  #portfolio-print-root section {
+    break-inside: auto;
+  }
+
+  #portfolio-print-root p {
+    margin: 3pt 0;
+    overflow-wrap: anywhere;
+  }
+}

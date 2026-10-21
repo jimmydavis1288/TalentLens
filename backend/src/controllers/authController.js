@@ -29,15 +29,7 @@ export async function login(req, res, next) {
 }
 
 export async function requestPasswordReset(req, res, next) {
-  try {
-    const user = await User.findOne({ email: req.body.email?.toLowerCase() }).select('+passwordResetToken +passwordResetExpiresAt')
-    if (!user) return res.status(404).json({ code: 'USER_NOT_FOUND', message: 'No account was found for this email.' })
-    const resetToken = crypto.randomBytes(32).toString('hex')
-    user.passwordResetToken = crypto.createHash('sha256').update(resetToken).digest('hex')
-    user.passwordResetExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
-    await user.save()
-    return res.json({ message: 'Set a new password below. This development reset link expires in 15 minutes.', resetToken })
-  } catch (error) { return next(error) }
+  return res.status(503).json({ message: 'Password recovery is temporarily unavailable because secure email delivery is not configured. Please contact the administrator.' })
 }
 
 export async function resetPassword(req, res, next) {
@@ -45,10 +37,16 @@ export async function resetPassword(req, res, next) {
     const { email, password, resetToken } = req.body
     if (!password || password.length < 8) return res.status(400).json({ message: 'Password must contain at least 8 characters.' })
     const tokenHash = crypto.createHash('sha256').update(resetToken || '').digest('hex')
-    const user = await User.findOne({ email: email?.toLowerCase(), passwordResetToken: tokenHash, passwordResetExpiresAt: { $gt: new Date() } }).select('+password +passwordResetToken +passwordResetExpiresAt')
+    const resetFilter = { email: email?.toLowerCase(), passwordResetToken: tokenHash, passwordResetExpiresAt: { $gt: new Date() } }
+    if (!(await User.exists(resetFilter))) return res.status(400).json({ message: 'This reset request is invalid or has expired.' })
+    const hashedPassword = await bcrypt.hash(password, 12)
+    resetFilter.passwordResetExpiresAt = { $gt: new Date() }
+    const user = await User.findOneAndUpdate(
+      resetFilter,
+      { $set: { password: hashedPassword }, $unset: { passwordResetToken: 1, passwordResetExpiresAt: 1 } },
+      { new: true },
+    )
     if (!user) return res.status(400).json({ message: 'This reset request is invalid or has expired.' })
-    user.password = await bcrypt.hash(password, 12); user.passwordResetToken = undefined; user.passwordResetExpiresAt = undefined
-    await user.save()
     return res.json({ message: 'Password updated. You can now sign in.' })
   } catch (error) { return next(error) }
 }

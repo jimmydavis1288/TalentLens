@@ -1,0 +1,71 @@
+[
+  {
+    "id": "clinical-analytics",
+    "role": "Data Analyst",
+    "resumeText": "Clinical research analyst who analyzed hospital patient cohorts in clinical trials. Built dashboards to compare treatment outcomes and efficacy using Python, SQL, and pandas.",
+    "skills": ["Python", "SQL"],
+    "relevantJobId": "clinical",
+    "jobs": [
+      {
+        "id": "retail",
+        "jobTitle": "Data Analyst",
+        "jobDescription": "Analyze retail sales, inventory, seasonal demand, and consumer revenue trends with Python and SQL.",
+        "jobGeo": "India",
+        "pubDate": "2026-10-01"
+      },
+      {
+        "id": "clinical",
+        "jobTitle": "Data Analyst",
+        "jobDescription": "Analyze patient cohorts in clinical trials and report treatment outcomes and efficacy for hospital research using Python and SQL.",
+        "jobGeo": "India",
+        "pubDate": "2026-10-01"
+      }
+    ]
+  },
+  {
+    "id": "accessible-frontend",
+    "role": "Frontend Developer",
+    "resumeText": "Frontend engineer focused on accessible web applications. Built reusable React components, keyboard navigation, screen reader support, and responsive interfaces.",
+    "skills": ["React", "JavaScript"],
+    "relevantJobId": "accessibility",
+    "jobs": [
+      {
+        "id": "animation",
+        "jobTitle": "Frontend Developer",
+        "jobDescription": "Build animated marketing pages and visual effects with React and JavaScript for product launches.",
+        "jobGeo": "India",
+        "pubDate": "2026-10-01"
+      },
+      {
+        "id": "accessibility",
+        "jobTitle": "Frontend Developer",
+        "jobDescription": "Build accessible React applications with reusable components, keyboard navigation, screen reader support, and responsive interfaces using JavaScript.",
+        "jobGeo": "India",
+        "pubDate": "2026-10-01"
+      }
+    ]
+  },
+  {
+    "id": "secure-backend",
+    "role": "Backend Developer",
+    "resumeText": "Backend engineer designed secure REST APIs for financial accounts. Implemented authentication, authorization, audit logging, and PostgreSQL data models with Node.js.",
+    "skills": ["Node.js", "PostgreSQL"],
+    "relevantJobId": "api-security",
+    "jobs": [
+      {
+        "id": "game-server",
+        "jobTitle": "Backend Developer",
+        "jobDescription": "Maintain multiplayer game servers and real-time leaderboards using Node.js and PostgreSQL.",
+        "jobGeo": "India",
+        "pubDate": "2026-10-01"
+      },
+      {
+        "id": "api-security",
+        "jobTitle": "Backend Developer",
+        "jobDescription": "Develop secure REST APIs for account services, authentication and authorization flows, audit logs, and PostgreSQL persistence using Node.js.",
+        "jobGeo": "India",
+        "pubDate": "2026-10-01"
+      }
+    ]
+  }
+]

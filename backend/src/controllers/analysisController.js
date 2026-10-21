@@ -1,4 +1,17 @@
-import { contextualAnalysis, deterministicMatches, extractResumeText, isSupportedResume, normalizeResume, parseResume } from '../services/resumePipelineService.js'
+import { contextualAnalysis, deterministicMatches, extractResumeText, isSupportedResume, normalizeContextualAnalysis, normalizeResume, parseResume } from '../services/resumePipelineService.js'
+import { scoreCareerRoles } from '../services/careerRoleScoring.js'
+
+export function handleResumeAnalysisError(res, error, next) {
+  if (error?.code === 'GEMINI_NOT_CONFIGURED') {
+    return res.status(503).json({ success: false, message: 'Resume analysis requires Gemini configuration. Add GEMINI_API_KEY to the backend environment.' })
+  }
+  const temporaryAiFailure = error?.status === 429 || error?.status === 503 || error?.status >= 500 || error?.retryable === true
+  if (temporaryAiFailure) {
+    return res.status(503).json({ success: false, message: 'Resume analysis is temporarily unavailable. Please try again in a moment.' })
+  }
+  if (error.status) return res.status(error.status).json({ success: false, message: error.message })
+  return next(error)
+}
 
 export async function matchCandidates(req, res, next) {
   try {
@@ -12,15 +25,19 @@ export async function matchCandidates(req, res, next) {
 export async function analyzeResume(req, res, next) {
   try {
     if (!req.file || !isSupportedResume(req.file)) return res.status(400).json({ message: 'Upload a PDF, DOC, or DOCX resume.' })
-    console.info('[Analysis] File received'); const text = await extractResumeText(req.file); console.info(`[Analysis] Text extracted: ${text.length} characters`); const resume = normalizeResume(await parseResume(text)); console.info(`[Analysis] Normalized skills: ${resume.skills.length}`); const matches = deterministicMatches(resume); const ai = await contextualAnalysis(resume, matches); const roles = matches.map((match, index) => ({ title: match.role.title, score: Math.round(match.score + Math.max(0, Math.min(100, ai.semanticScores?.[index] || 0)) * 0.3), reason: index ? 'Combined structured and contextual relevance.' : 'Best combined structured and contextual relevance.' }));
-    // Development-only shape logging: enough to diagnose contracts without exposing resume data.
-    console.info('[Analysis Debug]', {
-      skills: { type: Array.isArray(resume.skills) ? 'array' : typeof resume.skills, length: resume.skills.length, sample: resume.skills.slice(0, 3) },
-      missingSkills: { type: Array.isArray(ai.missingSkills) ? 'array' : typeof ai.missingSkills, length: ai.missingSkills.length, sample: ai.missingSkills.slice(0, 2).map(({ skill }) => skill) },
-      missingSections: { type: Array.isArray(ai.missingSections) ? 'array' : typeof ai.missingSections, length: ai.missingSections.length, sample: ai.missingSections.slice(0, 2).map(({ section }) => section) },
-      improvementSuggestions: { type: Array.isArray(ai.improvementSuggestions) ? 'array' : typeof ai.improvementSuggestions, length: ai.improvementSuggestions.length, sample: ai.improvementSuggestions.slice(0, 2).map(({ category }) => category) },
-    })
-    console.info(`[Analysis] Final response prepared; alternatives: ${roles.length - 1}`)
-    return res.json({ success: true, data: { resume, bestJobRole: roles[0] || { title: 'No recommended role', score: 0, reason: '' }, alternativeRoles: roles.slice(1), strengths: ai.strengths, missingSkills: ai.missingSkills, missingSections: ai.missingSections, improvementSuggestions: ai.improvementSuggestions, overallSummary: ai.overallSummary } })
-  } catch (error) { if (error.status) return res.status(error.status).json({ success: false, message: error.message }); return next(error) }
+    const text = await extractResumeText(req.file)
+    const resume = normalizeResume(await parseResume(text))
+    const matches = deterministicMatches(resume)
+    let ai = normalizeContextualAnalysis()
+    let contextualAnalysisAvailable = true
+    try {
+      ai = await contextualAnalysis(resume, matches)
+    } catch (error) {
+      const transientFailure = error?.status === 429 || error?.status === 503 || Number(error?.status) >= 500 || error?.retryable === true
+      if (!transientFailure) throw error
+      contextualAnalysisAvailable = false
+    }
+    const roles = scoreCareerRoles(matches, ai)
+    return res.json({ success: true, data: { resume, bestJobRole: roles[0] || { title: 'No matching role found', score: null, matchingMethod: 'structured-skills', reason: 'No supported role skills were extracted from this resume.' }, alternativeRoles: roles.slice(1), strengths: ai.strengths, missingSkills: ai.missingSkills, missingSections: ai.missingSections, improvementSuggestions: ai.improvementSuggestions, overallSummary: contextualAnalysisAvailable ? ai.overallSummary : 'Contextual AI was unavailable; the role result uses structured skill overlap only.', contextualAnalysisAvailable } })
+  } catch (error) { return handleResumeAnalysisError(res, error, next) }
 }

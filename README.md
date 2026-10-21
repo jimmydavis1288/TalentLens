@@ -84,13 +84,17 @@ A job seeker can upload a resume and receive:
 - Resume improvement suggestions
 - Relevant job opportunities
 - Resume-to-job matching
+- Hybrid keyword, deterministic-context, and Gemini-embedding scoring with explicit method labels
+- Domain-aware skill weighting with bounded, explainable scores
+- Reviewed, MongoDB-persisted skill catalogue additions
+- Editable portfolio preview with browser print/Save as PDF
 - Direct application links
 
 ---
 
 # Objectives
 
-The project has two primary objectives.
+The project demonstrates four primary objectives.
 
 ## Objective 1 — Resume Analytics and Accurate Job Recommendation
 
@@ -112,11 +116,19 @@ AI-powered contextual reasoning is used to understand the semantic relationship 
 
 ## Objective 2 — Resume-to-Portfolio Transformation
 
-Transform structured resume information into a meaningful digital portfolio.
+Transform successfully extracted professional information into an editable portfolio preview that can be printed or saved as PDF. The MVP omits unavailable sections and does not publish a hosted website.
 
-The planned portfolio feature will allow a job seeker to convert their resume into a structured personal portfolio website.
+---
 
-The portfolio MVP is currently pending and will be implemented in a later development phase.
+## Objective 3 — Domain-Based Skill Weighting
+
+Job domain is inferred from available title, description, and skills. Domain-specific multipliers prioritize relevant skills while retaining the original keyword baseline and bounding the weighted score.
+
+---
+
+## Objective 4 — Evolving Skill Catalogue
+
+Resume skills not already listed are presented for explicit job-seeker review. Accepted entries are validated, normalized, persisted in MongoDB, and included in recommendation explanations.
 
 ---
 
@@ -132,7 +144,7 @@ The current development focus is the **Job Seeker side** of the platform.
 - JWT-based authentication
 - Job Seeker dashboard
 - Resume upload
-- PDF/DOC/DOCX resume processing
+- PDF/DOCX resume processing
 - Resume text extraction
 - AI-powered resume analysis using Google Gemini
 - Structured resume normalization
@@ -146,15 +158,20 @@ The current development focus is the **Job Seeker side** of the platform.
 - India-oriented job search
 - Resume-to-job matching
 - Job match scoring
+- Score contract: `matchScore`, `finalScore`, and numeric components are finite values in the 0–100 range; `matchScore` is `null` only when no matching evidence exists. The frontend renders invalid or unavailable values as “Match unavailable,” never as a coerced percentage.
 - Direct application links
 - Responsive result dashboard
+- Domain-based skill weighting
+- User-reviewed additions to the persistent skill catalogue
+- Editable portfolio preview and browser PDF export
 
 ## Partially Implemented / Being Refined
 
 - Job matching accuracy
 - Job ranking
 - India-focused job filtering
-- Semantic comparison between resumes and job descriptions
+- Gemini contextual role scoring based on the structured resume and suggested role titles
+- Gemini embedding comparison of resume context and shortlisted job descriptions when configured, with a deterministic text-overlap fallback
 - Dashboard UI/UX refinement
 - Job provider coverage
 
@@ -162,11 +179,10 @@ The current development focus is the **Job Seeker side** of the platform.
 
 - Recruiter-side functionality
 - Recruiter candidate ranking
-- Resume-to-portfolio website generation
 - Portfolio customization
 - Portfolio publishing/sharing
 - Additional job providers for broader India-specific coverage
-- Advanced semantic job matching
+- Broader semantic candidate retrieval and evaluation
 
 ---
 
@@ -192,7 +208,6 @@ Job seekers can upload their resumes through the web interface.
 Supported formats include:
 
 - PDF
-- DOC
 - DOCX
 
 Uploaded files are processed by the backend before entering the resume-analysis pipeline.
@@ -309,18 +324,9 @@ A job may contain:
 
 Job recommendations are not simply displayed in the order returned by the job provider.
 
-The system attempts to compare the candidate's profile with individual job listings.
+The original keyword-based score remains available as a baseline. When `GEMINI_API_KEY` is configured, the backend obtains Gemini text embeddings for a bounded resume profile and up to 20 location-eligible baseline-ranked job descriptions, then combines cosine similarity with the baseline. If embedding calls are unavailable or no key is configured, it uses deterministic overlap across resume context and job text. Match results include matched/missing skills and score components. This first version embeds only the baseline shortlist, so it may not retrieve semantically relevant jobs outside those 20 candidates.
 
-Matching can consider:
-
-- Job title
-- Candidate skills
-- Job description
-- Required technologies
-- Role relevance
-- Available job requirements
-
-The resulting score is used to prioritize opportunities that are more relevant to the candidate.
+`backend/test/fixtures/matching-evaluation.json` is a small manually reviewed synthetic benchmark. Its tests compare baseline and deterministic-fallback top-one relevance on three examples; this is a regression check, not evidence of broad real-world accuracy or live Gemini embedding quality.
 
 ---
 
@@ -554,7 +560,6 @@ Gemini is used for tasks such as:
 - Generating contextual explanations
 - Identifying skill gaps
 - Generating resume improvement suggestions
-- Interpreting job descriptions where appropriate
 
 Gemini is not responsible for inventing job listings or application URLs.
 
@@ -569,6 +574,8 @@ A Gemini API key can be created through Google AI Studio.
 Add it to the backend environment file:
 
     GEMINI_API_KEY=your_google_gemini_api_key
+
+Job recommendations use the existing Google GenAI SDK embedding endpoint when this key is configured. The optional `GEMINI_EMBEDDING_MODEL` setting defaults to `gemini-embedding-001`. Matching sends a bounded resume profile (excluding top-level name and email) and shortlisted job text from the backend; if embeddings are unavailable, deterministic text-overlap scoring is used. The embedding request is batched for the resume and up to 20 location-eligible, baseline-ranked jobs.
 
 An optional Gemini model can also be configured:
 
@@ -812,13 +819,17 @@ The repository is organized into separate frontend and backend applications.
     |   |   |   +-- auth.js
     |   |   |
     |   |   +-- services/
-    |   |       +-- analysisService.js
+    |   |       +-- resumePipelineService.js
     |   |       +-- jobSearchService.js
+    |   |   +-- data/
+    |   |       +-- jobRoles.js
     |   |
     |   +-- .env
-    |   +-- .env.example
     |   +-- package.json
     |   +-- package-lock.json
+    |   +-- test/
+    |       +-- matching.test.js
+    |       +-- passwordReset.test.js
     |
     +-- frontend/
     |   |
@@ -846,13 +857,9 @@ The exact structure may evolve as additional project modules are implemented.
 
 All sensitive credentials must remain in the backend environment.
 
-Create:
+Create manually (there is no checked-in environment example):
 
     backend/.env
-
-using:
-
-    backend/.env.example
 
 Example configuration:
 
@@ -873,19 +880,6 @@ Jobicy currently does not require an API key for the public endpoint.
 Never commit the following file to Git:
 
     .env
-
-The repository should contain:
-
-    .env.example
-
-with placeholders only.
-
-Example:
-
-    MONGODB_URI=
-    JWT_SECRET=
-    GEMINI_API_KEY=
-    GEMINI_MODEL=
 
 Never expose the following values through frontend environment variables:
 
@@ -908,13 +902,9 @@ All protected external services should be accessed from the backend.
 
 ## 2. Install dependencies
 
-Install the required project dependencies.
-
-If the root project provides the combined development command:
-
     npm install
-
-Install frontend/backend dependencies as required by the current package configuration.
+    npm --prefix backend install
+    npm --prefix frontend install
 
 ---
 
@@ -924,24 +914,25 @@ Create:
 
     backend/.env
 
-using:
-
-    backend/.env.example
-
-Configure:
+Configure these backend-only variables in `backend/.env`:
 
     MONGODB_URI=your_mongodb_connection_string
     JWT_SECRET=your_long_random_jwt_secret
     GEMINI_API_KEY=your_google_gemini_api_key
-    GEMINI_MODEL=gemini-2.0-flash
+
+`GEMINI_MODEL` is optional; the backend defaults to `gemini-3.6-flash`.
 
 ---
 
 ## 4. Start the application
 
-Run:
+    npm run dev
 
-    npm run dev:full
+Other available root commands:
+
+    npm test
+    npm run lint
+    npm run build
 
 The frontend should be available at:
 
@@ -952,6 +943,8 @@ The Express backend runs on:
     http://127.0.0.1:5000
 
 The frontend proxies `/api` requests to the Express backend.
+
+Password recovery is temporarily unavailable: no secure email-delivery provider is configured, so the backend does not issue or return reset tokens. Configure real email delivery before enabling password-reset requests.
 
 ---
 
@@ -1158,9 +1151,9 @@ The planned recruiter workflow is:
 
 ---
 
-# 2. Resume-to-Portfolio Website — MVP
+# 2. Portfolio Publishing — Future Work
 
-The second major pending feature is transformation of a resume into a digital portfolio.
+The portfolio preview and print-to-PDF MVP is implemented in the job-seeker dashboard. Hosting, publishing, and sharing portfolios remain future work.
 
 The planned workflow is:
 
@@ -1193,9 +1186,9 @@ The portfolio MVP is expected to generate sections such as:
 - Projects
 - Certifications
 - Achievements
-- Contact
+- Contact information is deliberately excluded from generated portfolios.
 
-The objective is to convert existing resume information into a presentable digital profile without requiring the user to manually build a website.
+The MVP converts available resume information into an editable, presentable preview without publishing a hosted website.
 
 ---
 
@@ -1338,9 +1331,10 @@ The system does not claim that AI recommendations are perfectly accurate.
 
 Job matching currently depends on the quality and completeness of available resume and job information.
 
-Future versions can improve matching through:
+Further evaluation and improvements can address:
 
-- Stronger semantic embeddings
+- Embedding shortlist recall and ranking quality
+- Larger, independently reviewed evaluation datasets
 - Domain-specific skill taxonomies
 - Experience weighting
 - Education relevance
