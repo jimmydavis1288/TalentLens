@@ -18,7 +18,7 @@ function DashboardShell({ title, subtitle, children }) {
           </button>
         </header>
         <section className="mb-8">
-          <p className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">Jobekaa workspace</p>
+          <p className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">TalentLens workspace</p>
           <h1 className="text-4xl font-semibold tracking-[-0.05em] text-slate-950 sm:text-5xl">{title}</h1>
           <p className="mt-3 max-w-2xl text-slate-600">{subtitle}</p>
         </section>

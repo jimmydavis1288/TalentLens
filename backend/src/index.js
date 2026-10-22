@@ -1,35 +1,46 @@
 import 'dotenv/config'
 import dns from 'node:dns'
-import express from 'express'
-import cors from 'cors'
 import mongoose from 'mongoose'
-import authRoutes from './routes/auth.js'
-import analysisRoutes from './routes/analysis.js'
-import jobsRoutes from './routes/jobs.js'
-import skillsRoutes from './routes/skills.js'
-import portfolioRoutes from './routes/portfolio.js'
+import app from './app.js'
+import User from './models/User.js'
+import Skill from './models/Skill.js'
+import RecruitmentAnalysis from './models/RecruitmentAnalysis.js'
+import RecruitmentResumeSource from './models/RecruitmentResumeSource.js'
+import ResumeProfileCache from './models/ResumeProfileCache.js'
+import JobProfileCache from './models/JobProfileCache.js'
 
-const app = express()
-// Atlas uses SRV records. This fallback avoids a local DNS resolver that rejects SRV queries.
-dns.setServers([process.env.MONGODB_DNS_SERVER || '1.1.1.1'])
-app.use(cors())
-app.use(express.json())
-app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
-app.use('/api/auth', authRoutes)
-app.use('/api/analysis', analysisRoutes)
-app.use('/api/jobs', jobsRoutes)
-app.use('/api/skills', skillsRoutes)
-app.use('/api/portfolio', portfolioRoutes)
-app.use((error, _req, res, _next) => {
-  const uploadError = error?.name === 'MulterError'
-  const status = uploadError ? (error.code === 'LIMIT_FILE_SIZE' ? 413 : 400) : Number(error?.status) || 500
-  const message = uploadError
-    ? error.code === 'LIMIT_FILE_SIZE' ? 'The uploaded file exceeds the 10MB limit.' : 'The uploaded files or form fields are invalid.'
-    : status >= 500 ? 'Something went wrong. Please try again.' : error.message
-  console.error('[API] Request failed', { status, errorName: error?.name || 'Error' })
-  res.status(status).json({ message })
-})
+// Keep the hosting environment's DNS configuration unless an operator explicitly overrides it.
+if (process.env.MONGODB_DNS_SERVER) dns.setServers([process.env.MONGODB_DNS_SERVER])
 
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => app.listen(process.env.PORT || 5000, () => console.log(`Jobekaa API listening on port ${process.env.PORT || 5000}`)))
-  .catch((error) => { console.error('MongoDB connection failed:', error?.name || 'Error'); process.exit(1) })
+if (!process.env.MONGODB_URI || !process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  console.error('Production configuration is incomplete: MONGODB_URI and a JWT_SECRET of at least 32 characters are required.')
+  process.exit(1)
+}
+
+const requiredModels = [User, Skill, RecruitmentAnalysis, RecruitmentResumeSource, ResumeProfileCache, JobProfileCache]
+let server
+
+async function start() {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI)
+    // Build unique and TTL indexes before accepting requests; startup fails safely if they cannot be built.
+    await Promise.all(requiredModels.map((model) => model.createIndexes()))
+    const port = Number(process.env.PORT || 5000)
+    server = app.listen(port, '0.0.0.0', () => console.log(`TalentLens API listening on port ${port}`))
+  } catch (error) {
+    console.error('Backend startup failed:', error?.name || 'Error')
+    await mongoose.disconnect().catch(() => {})
+    process.exitCode = 1
+  }
+}
+
+async function shutdown(signal) {
+  console.log(`Received ${signal}; shutting down.`)
+  if (server) await new Promise((resolve) => server.close(resolve))
+  await mongoose.disconnect().catch((error) => console.error('MongoDB shutdown failed:', error?.name || 'Error'))
+}
+
+process.once('SIGTERM', () => { shutdown('SIGTERM').catch(() => { process.exitCode = 1 }) })
+process.once('SIGINT', () => { shutdown('SIGINT').catch(() => { process.exitCode = 1 }) })
+
+await start()

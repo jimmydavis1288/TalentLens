@@ -136,7 +136,7 @@ test('Gemini retry does not retry non-retryable client errors', async () => {
   }
 })
 
-test('embedding fallback remains deterministic when Gemini embeddings fail', async () => {
+test('embedding failures do not fall back to deterministic scores', async () => {
   const originalFetch = globalThis.fetch
   const originalGeminiKey = process.env.GEMINI_API_KEY
   process.env.GEMINI_API_KEY = 'test-key'
@@ -155,9 +155,7 @@ test('embedding fallback remains deterministic when Gemini embeddings fail', asy
   }))
 
   try {
-    const result = await findRecommendedJobs({ role: 'Frontend Developer', skills: ['React'], location: 'india', resumeText: 'React frontend systems.' })
-    assert.equal(result.source, 'Jobicy')
-    assert.equal(result.jobs[0].matchMethod, 'deterministic-context')
+    await assert.rejects(findRecommendedJobs({ role: 'Frontend Developer', skills: ['React'], location: 'india', resumeText: 'React frontend systems.' }), (error) => error.status === 503 && error.failureCategory === 'gemini_unavailable')
   } finally {
     globalThis.fetch = originalFetch
     resetSearchGeminiClientFactory()
@@ -181,7 +179,8 @@ test('transient Gemini outages produce a clear user-facing analysis response', (
   handleResumeAnalysisError(res, error, next)
 
   assert.equal(res.statusCode, 503)
-  assert.equal(res.body.message, 'Resume analysis is temporarily unavailable. Please try again in a moment.')
+  assert.equal(res.body.code, 'GEMINI_UNAVAILABLE')
+  assert.equal(res.body.message, 'Gemini is temporarily unavailable. Please retry shortly.')
 })
 
 test('missing Gemini configuration is distinguished from a temporary outage', () => {
@@ -319,7 +318,7 @@ test('identical job search inputs reuse a consistent cached result', async () =>
 test('different resume context does not reuse personalized cached recommendations', async () => {
   const originalFetch = globalThis.fetch
   const originalGeminiKey = process.env.GEMINI_API_KEY
-  process.env.GEMINI_API_KEY = ''
+  process.env.GEMINI_API_KEY = 'test-key'
   let fetchCount = 0
   globalThis.fetch = async () => {
     fetchCount += 1
@@ -336,6 +335,7 @@ test('different resume context does not reuse personalized cached recommendation
       }),
     }
   }
+  setSearchGeminiClientFactory(() => ({ models: { embedContent: async ({ contents }) => ({ embeddings: contents.map(({ parts }) => ({ values: parts[0].text.includes('Clinical') ? [1, 0] : [0, 1] })) }) } }))
 
   try {
     const shared = { role: 'Resume Context Cache Check', skills: ['SQL'], location: 'india', tag: 'phase2-cache-context' }
@@ -346,6 +346,7 @@ test('different resume context does not reuse personalized cached recommendation
     assert.notEqual(clinical.jobs[0].scoreComponents.contextualScore, retail.jobs[0].scoreComponents.contextualScore)
   } finally {
     globalThis.fetch = originalFetch
+    resetSearchGeminiClientFactory()
     if (originalGeminiKey === undefined) delete process.env.GEMINI_API_KEY
     else process.env.GEMINI_API_KEY = originalGeminiKey
   }

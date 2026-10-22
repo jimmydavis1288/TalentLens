@@ -28,6 +28,7 @@ The project is being developed as a final-year major project by a team of four.
 - [Job Recommendation Pipeline](#job-recommendation-pipeline)
 - [Project Structure](#project-structure)
 - [Environment Configuration](#environment-configuration)
+- [Staging Deployment](#staging-deployment)
 - [Local Setup](#local-setup)
 - [API Flow](#api-flow)
 - [Frontend Flow](#frontend-flow)
@@ -857,19 +858,27 @@ The exact structure may evolve as additional project modules are implemented.
 
 All sensitive credentials must remain in the backend environment.
 
-Create manually (there is no checked-in environment example):
+Copy the placeholder file and replace every value locally:
 
-    backend/.env
+    backend/.env.example -> backend/.env
 
 Example configuration:
 
     MONGODB_URI=your_mongodb_connection_string
 
-    JWT_SECRET=your_long_random_jwt_secret
+    JWT_SECRET=your_random_secret_at_least_32_characters
 
     GEMINI_API_KEY=your_google_gemini_api_key
 
-    GEMINI_MODEL=gemini-2.0-flash
+    GEMINI_MODEL=gemini-3.6-flash
+
+    CORS_ORIGINS=http://localhost:5173
+
+In production, `JWT_SECRET` must contain at least 32 characters. Set `CORS_ORIGINS` to a comma-separated list of trusted frontend origins; development keeps local origins available.
+
+`MONGODB_URI` and a 32-character-or-longer `JWT_SECRET` are required for the API to start. `GEMINI_API_KEY` is required for resume parsing and AI-backed job-requirement suggestions; the API can start without it, but those features will not be available. `PORT` is supplied by a hosting provider when applicable. `MONGODB_DNS_SERVER` is an optional DNS override and should normally be unset.
+
+The frontend may set `VITE_API_BASE_URL` at build time to the API origin including `/api`. It is public browser configuration; never put secrets in a `VITE_*` variable. When unset, the frontend uses same-origin `/api`, which is appropriate when a reverse proxy serves both tiers on one origin.
 
 Jobicy currently does not require an API key for the public endpoint.
 
@@ -888,6 +897,43 @@ Never expose the following values through frontend environment variables:
     JWT_SECRET
 
 All protected external services should be accessed from the backend.
+
+---
+
+# Staging Deployment
+
+No hosting provider is configured in this repository, and no staging service or credentials were available for this audit, so no deployment has been made. A low-friction fit for the current separate Vite and Express apps is a Render Static Site for the frontend, a Render Web Service for the backend, and a dedicated staging MongoDB database (for example, a separate Atlas database/cluster). This keeps Gemini and MongoDB credentials on the API service and needs no new runtime architecture.
+
+Render's static-site hosting is free to deploy, while a free web service can spin down after inactivity and is intended for previews rather than production. Paid web-service compute and bandwidth are billed separately; MongoDB hosting is a separate cost. Check current [Render pricing](https://render.com/pricing) and [free-instance limitations](https://render.com/docs/free) before enabling billing. This guide does not authorize paid services or a Git push.
+
+Use the Render Dashboard after connecting the repository. For the backend Web Service, set **Root Directory** to `backend`, **Build Command** to `npm ci`, **Start Command** to `npm start`, and **Health Check Path** to `/api/health`. Use Node.js 22.12 or newer (Vite 8's minimum). Set these backend environment variables through the host's secret/environment settings:
+
+    NODE_ENV=production
+    MONGODB_URI=<dedicated staging MongoDB URI>
+    JWT_SECRET=<random secret with at least 32 characters>
+    GEMINI_API_KEY=<server-side Gemini key>
+    CORS_ORIGINS=https://<your exact frontend hostname>
+
+`GEMINI_MODEL` and `GEMINI_EMBEDDING_MODEL` are optional. Leave `PORT` to Render. Do not set `MONGODB_DNS_SERVER` unless the host's DNS instructions require it. The backend waits for MongoDB and required unique/TTL indexes before it accepts traffic. `/api/health` returns only `ok` or `unavailable` and responds with 503 while MongoDB is disconnected.
+
+For the frontend Static Site, set **Root Directory** to `frontend`, **Build Command** to `npm ci && npm run build`, **Publish Directory** to `dist`, and add the build-time variable:
+
+    VITE_API_BASE_URL=https://<your backend hostname>/api
+
+Add an SPA rewrite in the Render dashboard: source `/*`, destination `/index.html`, action `Rewrite`, so browser refreshes on client-side routes serve the app. Set the backend `CORS_ORIGINS` to the exact HTTPS frontend origin with no path or trailing slash. The backend does not enable credentialed wildcard CORS.
+
+Use staging-only recruiter accounts and candidate records. Do not connect the staging service to production candidate data. After setup, verify `https://<backend hostname>/api/health`, the frontend page and browser network requests, recruiter login, and one controlled analysis/retry workflow. Staging deployments must use the same reviewed source revision on both services; the current uncommitted working tree cannot be deployed through a Git-connected service until it is reviewed and pushed by an authorized user.
+
+MongoDB TTL indexes are declared on extracted resume source expiry (7 days), cached resume profiles (30 days), and validated job-profile suggestions (30 days). Job-profile cache keys include the job-profile schema/parser version and Gemini model. Startup explicitly creates indexes without dropping collections or existing indexes. Verify them read-only with `db.<collection>.getIndexes()` in the staging database. TTL cleanup is asynchronous, so expiry timestamps are not exact deletion deadlines. Recruitment analysis records themselves have no automatic TTL and remain stored until an administrator deletes them through an approved data-retention process; this application does not currently provide recruiter self-service deletion/export.
+
+For a local production-style check, run:
+
+    npm test
+    npm run lint
+    npm run build
+    git diff --check
+
+`npm test` runs both the backend and frontend test suites. The repository has no backend lint script; `npm run lint` runs the existing frontend Oxlint configuration.
 
 ---
 
@@ -917,8 +963,9 @@ Create:
 Configure these backend-only variables in `backend/.env`:
 
     MONGODB_URI=your_mongodb_connection_string
-    JWT_SECRET=your_long_random_jwt_secret
+    JWT_SECRET=your_random_secret_at_least_32_characters
     GEMINI_API_KEY=your_google_gemini_api_key
+    CORS_ORIGINS=http://localhost:5173
 
 `GEMINI_MODEL` is optional; the backend defaults to `gemini-3.6-flash`.
 
@@ -1502,14 +1549,24 @@ This separation makes the system easier to debug, maintain, and extend.
 - Direct job application links
 - Dynamic result dashboard
 
-## Pending
+## Recruiter analysis and scoring notes
 
-- Recruiter-side implementation
-- Advanced recruiter candidate ranking
-- Resume-to-portfolio MVP
-- Portfolio customization
-- Portfolio publishing
-- Advanced semantic job matching
+The recruiter flow accepts pasted job descriptions or text-based PDF/DOCX files, asks Gemini to propose a source-cited profile, and requires recruiter confirmation before matching resumes. Confirmed requirements are scored from resume text and the grounded profile. Unfamiliar requirement names are retained when their evidence appears in the job description.
+
+The current fit score is the weighted percentage of confirmed requirements with direct resume evidence:
+
+`fit = round(sum(weight for supported requirements) / sum(weight for confirmed requirements) * 100)`
+
+Essential requirements default to weight 3 and preferred requirements to 1. Recruiters can adjust each weight from 0 to 5. The denominator is normalized by the sum of weights, so scores remain between 0 and 100. A missing mention is reported as not evidenced, not proof that a candidate lacks the qualification. Contradicted mandatory requirements and low evidence coverage send candidates to manual review. Default shortlist thresholds are 70% fit and 50% evidence coverage; recruiters can change and save them. Shortlist labels organize review and do not make hiring decisions.
+
+This is an explainable requirement-coverage estimate, not a hiring probability or a validated prediction of job performance. Candidate matching does not yet calculate semantic similarity to responsibilities or infer equivalence between differently worded experience. Gemini structures job descriptions and candidate profiles, but the final recruiter fit score uses deterministic, source-grounded evidence. A deterministic fallback is explicitly labelled when Gemini is unavailable.
+
+Candidate portfolios are generated from extracted resume details, editable in a dedicated route, saved as a private browser-local draft, and printable or savable as PDF. Public portfolio hosting is not implemented. Email remains private unless the candidate explicitly enables it in the draft.
+
+## Remaining roadmap
+
+- Semantic candidate-to-responsibility matching with validated evaluation
+- Public portfolio publishing and server-side draft persistence
 - Additional India-focused job providers
 - Job alerts and application tracking
 

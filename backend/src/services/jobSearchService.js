@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { GoogleGenAI } from '@google/genai'
 import jobRoles from '../data/jobRoles.js'
-import { withGeminiRetry } from './resumePipelineService.js'
+import { classifyGeminiError, withGeminiRetry } from './resumePipelineService.js'
 import { detectJobDomain, weightedSkillScore } from './domainWeighting.js'
 import { getSkillCatalog } from './skillCatalogService.js'
 import Skill from '../models/Skill.js'
@@ -118,23 +118,29 @@ function skillOccursInText(skill, text) {
 
 async function embedTexts(texts) {
   const ai = createGeminiClient()
-  return withGeminiRetry('embedding generation', async () => {
-    const response = await ai.models.embedContent({
-      model: embeddingModel(),
-      contents: texts.map((text) => ({ role: 'user', parts: [{ text: text.slice(0, 12000) }] })),
-      config: { taskType: 'SEMANTIC_SIMILARITY' },
-    })
-    const embeddings = response.embeddings?.map((item) => item.values)
-    if (embeddings?.length !== texts.length || embeddings.some((item) => !Array.isArray(item) || !item.length)) {
-      throw new Error('The embedding service returned an incomplete response.')
-    }
-    return embeddings
-  }, { maxAttempts: 3, baseDelayMs: 150 })
+  try {
+    return await withGeminiRetry('embedding generation', async () => {
+      const response = await ai.models.embedContent({
+        model: embeddingModel(),
+        contents: texts.map((text) => ({ role: 'user', parts: [{ text: text.slice(0, 12000) }] })),
+        config: { taskType: 'SEMANTIC_SIMILARITY' },
+      })
+      const embeddings = response.embeddings?.map((item) => item.values)
+      if (embeddings?.length !== texts.length || embeddings.some((item) => !Array.isArray(item) || !item.length)) {
+        throw Object.assign(new Error('The embedding service returned an incomplete response.'), { status: 502, code: 'GEMINI_INVALID_RESPONSE', failureCategory: 'gemini_invalid_response' })
+      }
+      return embeddings
+    }, { maxAttempts: 3, baseDelayMs: 150 })
+  } catch (error) {
+    error.failureCategory ||= classifyGeminiError(error)
+    throw error
+  }
 }
 
 export async function findRecommendedJobs({ role, skills = [], location = 'india', tag = '', resumeText = '' }) {
   const profileHash = createHash('sha256').update(resumeText).digest('hex')
-  const usesEmbeddings = Boolean(resumeText && process.env.GEMINI_API_KEY)
+  const usesEmbeddings = Boolean(resumeText)
+  if (usesEmbeddings && !process.env.GEMINI_API_KEY) throw Object.assign(new Error('Job recommendations require Gemini configuration.'), { status: 503, code: 'GEMINI_NOT_CONFIGURED', failureCategory: 'gemini_not_configured' })
   const storedSkills = mongoose.connection.readyState === 1 ? await Skill.find({}, { name: 1, _id: 0 }).lean().catch(() => []) : []
   const skillCatalog = [...new Set([...getSkillCatalog(), ...storedSkills.map(({ name }) => name)])]
   const key = JSON.stringify({ role, skills, location, tag, profileHash, skillCatalog, embeddingModel: usesEmbeddings ? embeddingModel() : null })
@@ -148,20 +154,22 @@ export async function findRecommendedJobs({ role, skills = [], location = 'india
       .filter(({ baseline }) => baseline.geographicScore > 0)
       .sort((a, b) => b.baseline.finalScore - a.baseline.finalScore)
       .slice(0, 20)
-    let embeddings = null
     if (usesEmbeddings && eligible.length) {
-      try {
-        embeddings = await embedTexts([resumeText, ...eligible.map(({ job }) => clean(`${job.jobTitle || ''} ${job.jobDescription || ''}`))])
-      } catch {
-        console.warn('[Matching] Semantic embeddings unavailable; using deterministic context matching.')
-      }
+      const embeddings = await embedTexts([resumeText, ...eligible.map(({ job }) => clean(`${job.jobTitle || ''} ${job.jobDescription || ''}`))])
+      const value = eligible.map(({ job }, index) => {
+        const similarity = cosineSimilarity(embeddings[0], embeddings[index + 1])
+        if (!Number.isFinite(similarity)) throw Object.assign(new Error('Gemini returned invalid recommendation embeddings.'), { status: 502, code: 'GEMINI_INVALID_RESPONSE', failureCategory: 'gemini_invalid_response' })
+        return scoreJobWithContext(job, { role, skills, location, resumeText, semanticScore: (similarity + 1) / 2, skillCatalog })
+      }).sort((a, b) => b.finalScore - a.finalScore).slice(0, 8)
+      const result = { source: 'Jobicy', jobs: value, fallbackSearchLinks: fallbackLinks(role) }; cache.set(key, { value: result, expires: Date.now() + 15 * 60 * 1000 }); return result
     }
-    const value = eligible.map(({ job }, index) => {
-      const similarity = embeddings ? cosineSimilarity(embeddings[0], embeddings[index + 1]) : null
-      return scoreJobWithContext(job, { role, skills, location, resumeText, semanticScore: similarity === null ? null : (similarity + 1) / 2, skillCatalog })
-    }).sort((a, b) => b.finalScore - a.finalScore).slice(0, 8)
+    const value = eligible.map(({ job }) => scoreJobWithContext(job, { role, skills, location, skillCatalog }))
+      .sort((a, b) => b.finalScore - a.finalScore).slice(0, 8)
     const result = { source: 'Jobicy', jobs: value, fallbackSearchLinks: fallbackLinks(role) }; cache.set(key, { value: result, expires: Date.now() + 15 * 60 * 1000 }); return result
-  } catch { return { source: null, jobs: [], fallbackSearchLinks: fallbackLinks(role) } }
+  } catch (error) {
+    if (usesEmbeddings) throw error
+    return { source: null, jobs: [], fallbackSearchLinks: fallbackLinks(role) }
+  }
 }
 function geographyScore(location, scope) { if (scope === 'global') return 70; const value = location.toLowerCase(); const foreignOnly = /united states|\busa\b|canada|united kingdom|\buk\b|europe only|us only/.test(value); if (foreignOnly) return 0; if (/india|\bin\b/.test(value)) return 100; if (/anywhere|worldwide|global/.test(value)) return scope === 'remote-india' ? 70 : 70; return scope === 'remote-india' && /remote/.test(value) ? 70 : 0 }
 function fallbackLinks(role) { const query = encodeURIComponent(`${role} India`); return [{ name: 'LinkedIn Jobs', url: `https://www.linkedin.com/jobs/search/?keywords=${query}` }, { name: 'Naukri', url: 'https://www.naukri.com/' }, { name: 'Indeed India', url: `https://in.indeed.com/jobs?q=${query}` }, { name: 'Internshala', url: 'https://internshala.com/jobs' }, { name: 'Wellfound', url: 'https://wellfound.com/jobs' }, { name: 'Cutshort', url: 'https://cutshort.io/jobs' }] }

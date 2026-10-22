@@ -32,7 +32,7 @@ function AuthCard({ selectedRole, onRoleChange, mode, onModeChange, onSubmit, lo
           id="auth-title"
           className="text-3xl font-semibold tracking-[-0.05em] text-slate-950"
         >
-          {isForgotPassword ? 'Reset your password' : mode === 'register' ? 'Create your account' : 'Welcome to Jobekaa'}
+          {isForgotPassword ? 'Reset your password' : mode === 'register' ? 'Create your account' : 'Welcome to TalentLens'}
         </h2>
       </div>
 
@@ -49,7 +49,7 @@ function AuthCard({ selectedRole, onRoleChange, mode, onModeChange, onSubmit, lo
               id="email"
               label="Email Address"
               type="email"
-              placeholder="you@jobekaa.com"
+              placeholder="you@example.com"
               value={form.email}
               onChange={updateField}
             />

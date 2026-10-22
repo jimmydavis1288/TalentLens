@@ -1,7 +1,8 @@
 import jwt from 'jsonwebtoken'
 
 export function requireAuth(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '')
+  if (!process.env.JWT_SECRET) return res.status(503).json({ message: 'Authentication is not configured.' })
+  const token = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1]
   if (!token) return res.status(401).json({ message: 'Authentication is required.' })
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET)

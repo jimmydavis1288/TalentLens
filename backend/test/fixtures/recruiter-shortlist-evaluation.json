@@ -1,0 +1,25 @@
+{
+  "job": {
+    "description": "Backend engineer: must build Node.js services with Kafka and PostgreSQL. Preferred: Kubernetes. Must demonstrate event-driven project experience.",
+    "requirements": ["node.js", "kafka", "postgresql", "kubernetes", "event-driven project"],
+    "definitions": [
+      { "name": "node.js", "category": "skill", "importance": "essential", "hardConstraint": true },
+      { "name": "kafka", "category": "skill", "importance": "essential", "hardConstraint": true },
+      { "name": "postgresql", "category": "skill", "importance": "essential" },
+      { "name": "kubernetes", "category": "skill", "importance": "preferred" },
+      { "name": "event-driven project", "category": "project", "importance": "essential" }
+    ]
+  },
+  "candidates": [
+    { "id": "strong", "skills": ["Node.js", "Kafka", "PostgreSQL", "Kubernetes"], "resume": "Built Node.js services with Kafka and PostgreSQL. Project: event-driven order processing. Used Kubernetes in production." },
+    { "id": "keyword-overlap", "skills": ["Node.js", "Kafka", "PostgreSQL"], "resume": "Interested in Node.js, Kafka and PostgreSQL news. No professional Node.js experience. Built a static portfolio site." },
+    { "id": "project-first", "skills": ["Node.js", "Kafka"], "resume": "Course project: event-driven order processing with Node.js and Kafka. Limited formal work experience." },
+    { "id": "mandatory-missing", "skills": ["Node.js", "PostgreSQL"], "resume": "Built Node.js and PostgreSQL services. No Kafka experience. Maintained an event-driven project." },
+    { "id": "negative", "skills": ["Node.js", "Kafka", "PostgreSQL"], "resume": "No Kafka experience. Built a Node.js reporting tool with PostgreSQL." },
+    { "id": "unfamiliar-tech", "skills": ["Go", "NATS", "PostgreSQL"], "resume": "Built a Go service with NATS and PostgreSQL for asynchronous events." }
+  ],
+  "additionalJob": {
+    "description": "Data platform engineer: required Go and NATS with PostgreSQL.",
+    "requirements": ["go", "nats", "postgresql"]
+  }
+}
